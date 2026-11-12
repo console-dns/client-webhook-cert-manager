@@ -3,7 +3,7 @@
 ## 构建依赖
 
 - Go 1.26 或更新版本。
-- Helm 3.8 或更新版本。
+- Helm 3.10 或更新版本（模板测试使用 `--set-json`）。
 - Docker：仅构建容器时需要。
 
 Go module 为 `github.com/console-dns/client-webhook-cert-manager`。DNS API 请求固定使用以下依赖：

@@ -190,7 +190,7 @@ webhook 支持通过 `dns01.cnameStrategy: Follow` 使用 CNAME 委派。当前�
 
 ## 开发与贡献
 
-开发需要 Go 1.26+ 和 Helm；构建容器镜像还需要 Docker。
+开发需要 Go 1.26+ 和 Helm 3.10+；构建容器镜像还需要 Docker。
 
 ```bash
 git clone https://github.com/console-dns/client-webhook-cert-manager.git
