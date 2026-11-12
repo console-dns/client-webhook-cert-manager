@@ -1,0 +1,17 @@
+apiVersion: v2
+name: client-webhook-cert-manager
+description: cert-manager DNS01 webhook for Console DNS
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - cert-manager
+  - dns01
+  - console-dns
+home: https://github.com/console-dns/client-webhook-cert-manager
+sources:
+  - https://github.com/console-dns/client-webhook-cert-manager
+annotations:
+  artifacthub.io/links: |
+    - name: Console DNS client
+      url: https://github.com/console-dns/client

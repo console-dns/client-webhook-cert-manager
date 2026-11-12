@@ -1,0 +1,27 @@
+# Create api-token in this namespace and grant the webhook access with
+# secretAccess: [{namespace: default, secretNames: [console-dns-api-token]}].
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: console-dns-staging
+  namespace: default
+spec:
+  acme:
+    email: admin@example.com
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: console-dns-staging-account
+    solvers:
+      - selector:
+          dnsZones:
+            - example.com
+        dns01:
+          webhook:
+            groupName: acme.console-dns.github.com
+            solverName: console-dns
+            config:
+              server: https://dns-api.example.com
+              tokenSecretRef:
+                name: console-dns-api-token
+                key: token
+              ttl: 60

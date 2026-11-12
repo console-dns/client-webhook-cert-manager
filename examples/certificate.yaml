@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-com
+  namespace: default
+spec:
+  secretName: example-com-tls
+  issuerRef:
+    name: console-dns-staging
+    kind: ClusterIssuer
+  dnsNames:
+    - example.com
+    - "*.example.com"

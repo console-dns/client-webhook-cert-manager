@@ -1,0 +1,71 @@
+# OCI repository: oci://ghcr.io/console-dns/charts/client-webhook-cert-manager
+# Install with: helm install console-dns-webhook \
+#   oci://ghcr.io/console-dns/charts/client-webhook-cert-manager \
+#   --namespace cert-manager --create-namespace
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/console-dns/client-webhook-cert-manager
+  # An empty tag uses the chart appVersion. Set digest to pin an immutable image.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# This value must match the groupName in the Issuer or ClusterIssuer solver.
+groupName: acme.console-dns.github.com
+
+# The Console DNS API settings are passed to the webhook through environment variables.
+dnsAPI:
+  timeout: 10s
+  insecureSkipTLSVerify: false
+  # Optional custom CA. The Secret is mounted by the Pod and is separate from
+  # the DNS credential Secret RBAC below.
+  # The selected key is mounted at /etc/console-dns/ca-bundle/<key>.
+  caBundleSecretRef:
+    name: ""
+    key: ca.crt
+
+service:
+  type: ClusterIP
+  port: 443
+  targetPort: 8443
+
+certManager:
+  # The cert-manager controller calls the aggregated API using this identity.
+  namespace: cert-manager
+  serviceAccountName: cert-manager
+
+# Each entry grants this webhook ServiceAccount get access to only the named Secrets
+# in the specified namespace. Add every namespace in which Issuer credentials live.
+secretAccess:
+  - namespace: cert-manager
+    secretNames:
+      - console-dns-api-token
+
+resources: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# The Console DNS server has shared mutable state in versions covered by the
+# initial integration. Keep one replica and use Recreate until backend
+# concurrency and persistence guarantees have been verified.
+updateStrategy: Recreate

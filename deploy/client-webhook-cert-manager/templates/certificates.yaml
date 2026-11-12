@@ -1,0 +1,65 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "client-webhook-cert-manager.selfSignedIssuerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "client-webhook-cert-manager.caCertificateName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ include "client-webhook-cert-manager.caCertificateName" . }}
+  secretName: {{ include "client-webhook-cert-manager.caSecretName" . }}
+  duration: 43800h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  issuerRef:
+    name: {{ include "client-webhook-cert-manager.selfSignedIssuerName" . }}
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "client-webhook-cert-manager.caIssuerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+spec:
+  ca:
+    secretName: {{ include "client-webhook-cert-manager.caSecretName" . }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "client-webhook-cert-manager.servingCertificateName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "client-webhook-cert-manager.servingSecretName" . }}
+  duration: 8760h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  dnsNames:
+    - {{ include "client-webhook-cert-manager.fullname" . }}
+    - {{ printf "%s.%s" (include "client-webhook-cert-manager.fullname" .) .Release.Namespace }}
+    - {{ printf "%s.%s.svc" (include "client-webhook-cert-manager.fullname" .) .Release.Namespace }}
+    - {{ printf "%s.%s.svc.cluster.local" (include "client-webhook-cert-manager.fullname" .) .Release.Namespace }}
+  issuerRef:
+    name: {{ include "client-webhook-cert-manager.caIssuerName" . }}
+    kind: Issuer
+    group: cert-manager.io

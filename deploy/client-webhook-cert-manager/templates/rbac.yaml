@@ -1,0 +1,98 @@
+{{- $fullName := include "client-webhook-cert-manager.fullname" . -}}
+{{- $saName := include "client-webhook-cert-manager.serviceAccountName" . -}}
+{{- range $index, $access := .Values.secretAccess }}
+{{- $accessName := printf "%s-secret-%d" ($fullName | trunc 48 | trimSuffix "-") $index -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $accessName }}
+  namespace: {{ $access.namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      {{- toYaml $access.secretNames | nindent 6 }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $accessName }}
+  namespace: {{ $access.namespace }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $accessName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+---
+# Allow the webhook to read the apiserver request-header CA ConfigMap.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "client-webhook-cert-manager.authenticationReaderName" . }}
+  namespace: kube-system
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+---
+# Allow the aggregated API server to delegate authentication decisions.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "client-webhook-cert-manager.authDelegatorName" . }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+---
+# cert-manager authenticates solver calls with its controller identity.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "client-webhook-cert-manager.domainSolverName" . }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - {{ .Values.groupName }}
+    resources:
+      - console-dns
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "client-webhook-cert-manager.domainSolverName" . }}
+  labels:
+    {{- include "client-webhook-cert-manager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "client-webhook-cert-manager.domainSolverName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.certManager.serviceAccountName }}
+    namespace: {{ .Values.certManager.namespace }}

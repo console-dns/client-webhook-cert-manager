@@ -1,0 +1,12 @@
+.git
+.github
+.helm
+.tmp
+*.swp
+*.tgz
+Dockerfile*
+docs
+bin
+dist
+webhook
+coverage

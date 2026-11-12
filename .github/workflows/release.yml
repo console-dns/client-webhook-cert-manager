@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPOSITORY: ghcr.io/console-dns/client-webhook-cert-manager
+  CHART_REPOSITORY: oci://ghcr.io/console-dns/charts
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      is_semver: ${{ steps.version.outputs.is_semver }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Parse and validate tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "is_semver=true" >>"${GITHUB_OUTPUT}"
+            echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          else
+            echo "is_semver=false" >>"${GITHUB_OUTPUT}"
+            echo "version=${version}" >>"${GITHUB_OUTPUT}"
+            echo "Tag ${GITHUB_REF_NAME} is not a supported semantic version; release is gated." >&2
+          fi
+
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify module files
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check dependency pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go list -m -f '{{.Version}}' github.com/console-dns/client)" = "v0.0.0-20250418013039-135fd950cbe2"
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(gofmt -l .)"
+          test -z "${files}" || { echo "gofmt required:"; echo "${files}"; exit 1; }
+
+      - name: Test with race detector
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./cmd/webhook
+
+      - name: Set up Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+
+      - name: Lint and smoke test chart
+        run: make helm-test
+
+      - name: Install setup-envtest
+        shell: bash
+        run: |
+          set -euo pipefail
+          GOTOOLCHAIN=local go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.0.0-20260511180552-3be3f1bf2b2f
+
+      - name: Download Kubernetes envtest assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_dir="$(setup-envtest use -p path 1.36.2)"
+          test -x "${asset_dir}/etcd"
+          test -x "${asset_dir}/kube-apiserver"
+          test -x "${asset_dir}/kubectl"
+          {
+            echo "KUBEBUILDER_ASSETS=${asset_dir}"
+            echo "TEST_ASSET_ETCD=${asset_dir}/etcd"
+            echo "TEST_ASSET_KUBE_APISERVER=${asset_dir}/kube-apiserver"
+            echo "TEST_ASSET_KUBECTL=${asset_dir}/kubectl"
+          } >>"${GITHUB_ENV}"
+
+      - name: Run integration tests
+        run: make integration-test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build container without pushing
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          load: true
+          tags: client-webhook-cert-manager:release-validation
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Package chart for validation
+        if: steps.version.outputs.is_semver == 'true'
+        run: make chart-package VERSION="${{ steps.version.outputs.version }}"
+
+  publish:
+    name: Publish image, chart, and GitHub release
+    needs: validate
+    if: needs.validate.outputs.is_semver == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4.3.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-architecture image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ needs.validate.outputs.version }}
+          build-args: VERSION=${{ needs.validate.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Package chart with release version
+        run: make chart-package VERSION="${{ needs.validate.outputs.version }}"
+
+      - name: Push chart to GHCR OCI
+        env:
+          HELM_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${HELM_REGISTRY_TOKEN}" | helm registry login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          helm push "dist/client-webhook-cert-manager-${{ needs.validate.outputs.version }}.tgz" "${CHART_REPOSITORY}"
+
+      - name: Create GitHub release and upload chart
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_flags=()
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/client-webhook-cert-manager-${{ needs.validate.outputs.version }}.tgz" \
+            --verify-tag \
+            --generate-notes \
+            --title "${GITHUB_REF_NAME}" "${release_flags[@]}"
